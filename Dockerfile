@@ -2,7 +2,7 @@
 # Dockerfile — AgentX-Sprint2
 # Build: docker build --platform linux/amd64 -t ghcr.io/tenalirama2005/agentx-sprint2:latest .
 # ============================================================
-FROM rust:1.82-slim AS builder
+FROM rust:slim AS builder
 
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
