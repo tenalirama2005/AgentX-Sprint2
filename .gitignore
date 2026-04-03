@@ -69,3 +69,28 @@ build.log
 test.log
 clippy.log
 session.log
+
+# Temporary fix scripts
+fix_all_errors.py
+fix1_car_bench.py
+fix2_warnings.py
+fix3_clippy.py
+fix4_handler.py
+fix5_tests.py
+
+# Build artifacts
+build.log
+clippy.log
+Cargo.lock
+
+# Phase2 artifacts (copied but not needed)
+cobol_mcp/
+rust_mcp/
+helm/
+k8s/
+legacy_source/
+logs/
+data/
+amber.json
+deploy.sh
+istio-1.29.1/
