@@ -1,5 +1,7 @@
 # AgentX-Sprint2
 
+[![CI/CD](https://github.com/tenalirama2005/AgentX-Sprint2/actions/workflows/agentx-sprint2.yml/badge.svg)](https://github.com/tenalirama2005/AgentX-Sprint2/actions/workflows/agentx-sprint2.yml) [![Docker](https://img.shields.io/badge/docker-tenalirama2026%2Fagentx--sprint2-blue)](https://hub.docker.com/r/tenalirama2026/agentx-sprint2)
+
 **FBA-powered A2A Purple Agent — AgentBeats Phase 2, Sprint 2**
 **Deadline: April 12, 2026**
 
