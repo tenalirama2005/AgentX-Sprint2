@@ -3,6 +3,8 @@
   program: {
     image: "tenalirama2026/agentx-sprint2:latest",
     entrypoint: [
+      "uv", "run",
+      "--directory", "/app/FieldWorkArena-GreenAgent",
       "python3",
       "/app/scenarios/fwa/purple_agent/fba_agent.py",
       "--host", "0.0.0.0",
