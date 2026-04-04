@@ -40,7 +40,6 @@ istio-*/
 
 # Rust build artifacts
 target/
-Cargo.lock
 
 # RTK (I see .rtk folder)
 .rtk/
@@ -81,7 +80,6 @@ fix5_tests.py
 # Build artifacts
 build.log
 clippy.log
-Cargo.lock
 
 # Phase2 artifacts (copied but not needed)
 cobol_mcp/
