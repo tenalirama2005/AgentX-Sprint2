@@ -1,0 +1,46 @@
+{
+  manifest_version: "0.1.0",
+  program: {
+    image: "tenalirama2026/agentx-sprint2:latest",
+    entrypoint: [
+      "python3",
+      "scenarios/fwa/purple_agent/fba_agent.py",
+      "--host",
+      "0.0.0.0",
+      "--port",
+      "9019"
+    ],
+    env: {
+      GEMINI_API_KEY: "${config.gemini_api_key}",
+      OPENAI_API_KEY: "${config.openai_api_key}",
+      HF_TOKEN: "${config.hf_token}",
+    },
+    network: {
+      endpoints: [
+        { name: "endpoint", port: 9019 },
+      ],
+    },
+  },
+  config_schema: {
+    type: "object",
+    properties: {
+      gemini_api_key: { type: "string", secret: true },
+      openai_api_key: { type: "string", secret: true },
+      hf_token: { type: "string", secret: true },
+    },
+    required: ["gemini_api_key", "openai_api_key", "hf_token"],
+    additionalProperties: false,
+  },
+  slots: {
+    proxy: { kind: "a2a" },
+  },
+  provides: {
+    a2a: { kind: "a2a", endpoint: "endpoint" },
+  },
+  exports: {
+    a2a: "a2a",
+  },
+  metadata: {
+    description: "FBA-powered purple agent for FieldWorkArena — Gemini 2.5 Pro vision, 54.11% score",
+  }
+}
