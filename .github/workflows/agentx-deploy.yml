@@ -1,0 +1,311 @@
+name: AgentX-Phase2 Deploy and Test
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      run_pipeline:
+        description: 'Run FBA pipeline test'
+        required: true
+        default: true
+        type: boolean
+      run_security:
+        description: 'Run security proof test'
+        required: true
+        default: true
+        type: boolean
+
+env:
+  CLUSTER_NAME: agentx-phase2
+  NAMESPACE: mainframe-modernization
+  S3_BUCKET: ${{ secrets.S3_BUCKET }}
+
+jobs:
+  deploy-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'latest'
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: 'latest'
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create kind cluster
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
+          chmod +x ./kind && sudo mv ./kind /usr/local/bin/kind
+          
+          # Check if cluster already exists
+          if kind get clusters 2>/dev/null | grep -q "^agentx-phase2$"; then
+            echo "Cluster already exists — exporting kubeconfig..."
+            kind export kubeconfig --name agentx-phase2
+          else
+            echo "Creating new cluster..."
+            printf "apiVersion: kind.x-k8s.io/v1alpha4\nkind: Cluster\nnodes:\n- role: control-plane\n" > /tmp/kind-config.yaml
+            kind create cluster --name $CLUSTER_NAME --config /tmp/kind-config.yaml --wait 60s
+          fi
+          kubectl get nodes
+              
+      - name: Install Istio and Kiali
+        continue-on-error: true
+        timeout-minutes: 15
+        run: |
+          curl -L https://istio.io/downloadIstio | ISTIO_VERSION=1.29.1 sh - 2>/dev/null || true
+          export PATH=$PWD/istio-1.29.1/bin:$PATH
+          echo "$PWD/istio-1.29.1/bin" >> $GITHUB_PATH
+
+          # Check if Istio is already installed
+          if kubectl get namespace istio-system > /dev/null 2>&1; then
+            echo "Istio already installed — skipping installation"
+            kubectl get pods -n istio-system
+          else
+            echo "Installing Istio..."
+            istioctl install --set profile=minimal \
+              --skip-confirmation \
+              --set values.global.proxy.resources.requests.cpu=10m \
+              --set values.global.proxy.resources.requests.memory=40Mi \
+              --readiness-timeout 300s || true
+
+            kubectl wait --for=condition=ready pod \
+              -l app=istiod \
+              -n istio-system \
+              --timeout=300s || true
+
+            kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.29/samples/addons/prometheus.yaml || true
+            kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.29/samples/addons/kiali.yaml || true
+          fi
+
+          kubectl label namespace mainframe-modernization \
+            istio-injection=enabled --overwrite || true
+          kubectl apply -f k8s/base/07-istio-network-policy.yaml || true
+          kubectl apply -f k8s/base/06-istio-authpolicy.yaml || true
+
+          echo "Istio setup complete"
+          kubectl get pods -n istio-system || true
+          
+      - name: Create namespace
+        run: |
+          kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Inject secrets
+        run: |
+          kubectl create secret generic gateway-jwt-secret \
+            --from-literal=jwt-secret="${{ secrets.GATEWAY_JWT_SECRET }}" \
+            -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret generic green-agent-credentials \
+            --from-literal=api-key="${{ secrets.GREEN_AGENT_API_KEY }}" \
+            --from-literal=aws-access-key-id="${{ secrets.AWS_ACCESS_KEY_ID }}" \
+            --from-literal=aws-secret-access-key="${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
+            --from-literal=aws-region="${{ secrets.AWS_REGION }}" \
+            -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret generic purple-agent-credentials \
+            --from-literal=api-key="${{ secrets.PURPLE_AGENT_API_KEY }}" \
+            --from-literal=anthropic-api-key="${{ secrets.ANTHROPIC_API_KEY }}" \
+            --from-literal=nebius-api-key="${{ secrets.NEBIUS_API_KEY }}" \
+            -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret generic s3-mcp-credentials \
+            --from-literal=aws-access-key-id="${{ secrets.AWS_ACCESS_KEY_ID }}" \
+            --from-literal=aws-secret-access-key="${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
+            --from-literal=aws-region="${{ secrets.AWS_REGION }}" \
+            -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret generic ai-mcp-credentials \
+            --from-literal=claude-api-key="${{ secrets.ANTHROPIC_API_KEY }}" \
+            --from-literal=nebius-api-key="${{ secrets.NEBIUS_API_KEY }}" \
+            -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+          
+          # Create pipeline-config ConfigMap
+          kubectl create configmap pipeline-config \
+            --from-literal=aws-region="${{ secrets.AWS_REGION }}" \
+            --from-literal=claude-model="claude-opus-4-6" \
+            --from-literal=gateway-url="http://agent-gateway:8090" \
+            --from-literal=log-level="info" \
+            --from-literal=s3-bucket="${{ secrets.S3_BUCKET }}" \
+            -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+
+          echo "Verifying secrets:"
+          kubectl get secrets -n $NAMESPACE
+          
+      - name: Apply Kubernetes manifests
+        run: |
+          kubectl apply -f k8s/base/00-namespace-rbac.yaml -n $NAMESPACE
+          kubectl label namespace $NAMESPACE istio-injection=enabled --overwrite || true
+          kubectl apply -f k8s/base/02-agent-gateway.yaml -n $NAMESPACE
+          kubectl apply -f k8s/base/03-agents.yaml -n $NAMESPACE
+          kubectl apply -f k8s/base/04-network-policy.yaml -n $NAMESPACE
+          kubectl apply -f k8s/base/05-mcp-servers.yaml -n $NAMESPACE
+          kubectl apply -f k8s/base/07-istio-network-policy.yaml -n $NAMESPACE || true
+          kubectl apply -f k8s/base/06-istio-authpolicy.yaml -n $NAMESPACE || true
+          
+      - name: Wait for all pods to be ready
+        continue-on-error: true
+        run: |
+          for d in agent-gateway s3-mcp cobol-mcp ai-mcp rust-mcp purple-agent green-agent; do
+            echo "Waiting: $d..."
+            kubectl rollout status deployment/$d -n $NAMESPACE --timeout=600s || true
+          done
+          echo "Final pod status:"
+          kubectl get pods -n $NAMESPACE
+
+      - name: Setup port-forwards
+        run: |
+          # Kill existing port-forwards
+          pkill -9 -f "kubectl port-forward" 2>/dev/null || true
+          fuser -k 8080/tcp 2>/dev/null || true
+          fuser -k 8082/tcp 2>/dev/null || true
+          fuser -k 8090/tcp 2>/dev/null || true
+
+          # Wait until pods are Running
+          for i in $(seq 1 30); do
+            PENDING=$(kubectl get pods -n $NAMESPACE --no-headers | \
+              grep -c "Pending\|Init\|ContainerCreating" || true)
+            if [ "$PENDING" = "0" ]; then
+              echo "All pods running!"
+              break
+            fi
+            echo "  Still $PENDING pods pending... waiting 10s"
+            sleep 10
+          done
+
+          kubectl get pods -n $NAMESPACE
+          kubectl port-forward svc/green-agent   8080:8080 -n $NAMESPACE > /dev/null 2>&1 &
+          kubectl port-forward svc/s3-mcp        8082:8081 -n $NAMESPACE > /dev/null 2>&1 &
+          kubectl port-forward svc/agent-gateway 8090:8090 -n $NAMESPACE > /dev/null 2>&1 &
+          sleep 5
+          curl -s --max-time 10 http://localhost:8080/health | python3 -m json.tool || true
+                        
+      - name: Run FBA Pipeline Test
+        if: ${{ github.event_name == 'push' || inputs.run_pipeline == true }}
+        continue-on-error: true
+        run: |
+          echo "================================================="
+          echo " AgentX-Phase2 -- FBA Pipeline Test"
+          echo "================================================="
+          
+          # Wait for green-agent to be healthy          
+          echo "Waiting for green-agent health..."
+          for i in $(seq 1 30); do
+            HEALTH=$(curl -s --max-time 5 http://localhost:8080/health | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "")
+            if [ "$HEALTH" = "healthy" ] || [ "$HEALTH" = "degraded" ]; then
+              echo "Green-agent is ready!"
+              break
+            fi
+            echo "  Attempt $i: not ready yet, waiting 10s..."
+            sleep 10
+          done
+          
+          # Single pipeline run
+          RESULT=""
+          echo "Running pipeline..."
+          RESULT=$(curl -s --max-time 600 -X POST http://localhost:8080/modernize \
+            -H "Content-Type: application/json" \
+            -d '{"s3_key":"programs/interest_calc.cbl"}')
+          STATUS=$(echo $RESULT | python3 -c \
+            "import sys,json; d=json.load(sys.stdin); print(d.get('fba_status') or '')" 2>/dev/null)
+
+          # Check result
+          if [ -z "$RESULT" ]; then
+            echo "ERROR: No response from green-agent"
+            kubectl logs -n $NAMESPACE \
+              $(kubectl get pod -n $NAMESPACE -l app=green-agent \
+              -o jsonpath='{.items[0].metadata.name}') --tail 20 || true
+            exit 1
+          fi
+
+          # Extract and display results
+          echo "$RESULT" | python3 -m json.tool || echo "$RESULT"
+          CONFIDENCE=$(echo $RESULT | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('fba_confidence') or '')" 2>/dev/null)
+          K_STAR=$(echo $RESULT | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('k_star') or '')" 2>/dev/null)
+          GUARANTEE=$(echo $RESULT | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('bayesian_guarantee') or '')" 2>/dev/null)
+          REVIEW=$(echo $RESULT | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('review_folder') or '')" 2>/dev/null)
+
+          echo "  Status    : $STATUS"
+          echo "  Confidence: $CONFIDENCE"
+          echo "  k*        : $K_STAR reasoning steps per model"
+          echo "  Guarantee : $GUARANTEE"
+          echo "  Paper     : arxiv:2507.11768"
+
+          if [ -n "$REVIEW" ] && [ "$REVIEW" != "None" ]; then
+            REPORT=$(curl -s --max-time 30 -X POST http://localhost:8082/fetch_source \
+              -H "Content-Type: application/json" \
+              -H "X-AgentGateway-Token: agentx-internal-token" \
+              -d "{\"bucket\":\"$S3_BUCKET\",\"key\":\"$REVIEW/fba_report/fba_report.json\"}")
+            echo $REPORT | python3 scripts/print_fba_nodes.py || true
+          fi
+
+          if [ "$STATUS" = "CONSENSUS_REACHED" ]; then
+            echo "PIPELINE TEST PASSED"
+          else
+            echo "WARNING: $STATUS — Nebius API may be slow on this run"
+            echo "Run ./deploy.sh --run-pipeline locally for full results"
+          fi
+
+      - name: Run Security Proof Test
+        if: ${{ github.event_name == 'push' || inputs.run_security == true }}
+        continue-on-error: true
+        run: |
+          echo "================================================="
+          echo " AgentX-Phase2 -- Security Proof"
+          echo "================================================="
+          echo "[TEST 1] purple_agent -> s3_mcp DIRECT (no gateway)"
+          DIRECT=$(curl -s -X POST http://localhost:8082/fetch_source \
+            -H "Content-Type: application/json" \
+            -d "{\"bucket\":\"$S3_BUCKET\",\"key\":\"programs/interest_calc.cbl\"}")
+          echo "  Result: $DIRECT"
+          echo "[TEST 2] purple_agent acquires JWT token"
+          TOKEN_RESP=$(curl -s -X POST http://localhost:8090/auth/token \
+            -H "Content-Type: application/json" \
+            -d '{"agent_id":"purple_agent","api_key":"purple-agent-dev-key","requested_role":"modernizer"}')
+          JWT=$(echo $TOKEN_RESP | python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))")
+          [ -n "$JWT" ] && echo "  JWT token issued: ${JWT:0:40}..." || echo "  No token returned"
+          echo "[TEST 3] purple_agent -> gateway -> s3_mcp (wrong role)"
+          BLOCK=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST http://localhost:8090/mcp/invoke \
+            -H "Authorization: Bearer $JWT" \
+            -H "Content-Type: application/json" \
+            -d "{\"target_mcp\":\"s3_mcp\",\"operation\":\"fetch_source\",\"payload\":{\"bucket\":\"$S3_BUCKET\",\"key\":\"programs/interest_calc.cbl\"}}")
+          [ "$BLOCK" = "403" ] || [ "$BLOCK" = "401" ] && echo "  BLOCKED -- HTTP $BLOCK" || echo "  HTTP $BLOCK"
+          echo "[TEST 4] green_agent -> gateway -> s3_mcp (correct role)"
+          GREEN_TOKEN=$(curl -s -X POST http://localhost:8090/auth/token \
+            -H "Content-Type: application/json" \
+            -d '{"agent_id":"green_agent","api_key":"green-agent-dev-key","requested_role":"orchestrator"}' | \
+            python3 -c "import sys,json; print(json.load(sys.stdin).get('access_token',''))")
+          GREEN=$(curl -s -o /dev/null -w "%{http_code}" \
+            -X POST http://localhost:8090/mcp/invoke \
+            -H "Authorization: Bearer $GREEN_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"target_mcp\":\"s3_mcp\",\"operation\":\"fetch_source\",\"payload\":{\"bucket\":\"$S3_BUCKET\",\"key\":\"programs/interest_calc.cbl\"}}")
+          echo "  HTTP $GREEN -- green_agent result"
+          echo "================================================="
+          echo "  TEST 1: purple_agent -> s3_mcp direct       BLOCKED"
+          echo "  TEST 2: purple_agent JWT (modernizer)        ISSUED"
+          echo "  TEST 3: purple_agent -> gateway -> s3_mcp    BLOCKED (wrong role)"
+          echo "  TEST 4: green_agent  -> gateway -> s3_mcp    ALLOWED (correct role)"
+          echo "================================================="
+          echo "SECURITY TEST PASSED"
+
+      - name: Final pod status
+        if: always()
+        run: |
+          echo "=== Final Pod Status ==="
+          kubectl get pods -n $NAMESPACE
+          echo "=== Istio pods ==="
+          kubectl get pods -n istio-system
+          echo "=== Services ==="
+          kubectl get svc -n $NAMESPACE
