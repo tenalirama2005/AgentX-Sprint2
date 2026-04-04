@@ -9,8 +9,8 @@ on:
   workflow_dispatch:
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: tenalirama2005/agentx-sprint2
+  REGISTRY: docker.io
+  IMAGE_NAME: tenalirama2026/agentx-sprint2
 
 jobs:
   # ── 1. Build & Test ──────────────────────────────────────────
@@ -66,8 +66,8 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: tenalirama2026
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
