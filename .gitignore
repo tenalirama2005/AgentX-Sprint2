@@ -91,6 +91,5 @@ k8s/
 legacy_source/
 logs/
 data/
-amber.json
 deploy.sh
 istio-1.29.1/

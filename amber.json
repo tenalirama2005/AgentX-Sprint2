@@ -1,0 +1,9 @@
+{
+  "name": "purple_agent",
+  "version": "1.0.0",
+  "description": "FBA-powered purple agent for FieldWorkArena — Gemini 2.5 Pro vision with online distance calibration achieving 54.11% factory score rate",
+  "image": "ghcr.io/tenalirama2005/agentx-sprint2:latest",
+  "port": 9019,
+  "capabilities": ["field_work_analysis", "factory_safety", "ppe_compliance", "distance_estimation", "vision_analysis"],
+  "tags": ["field_work", "fba", "vision", "safety", "factory", "warehouse"]
+}
