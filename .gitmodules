@@ -1,0 +1,3 @@
+[submodule "FieldWorkArena-GreenAgent"]
+	path = FieldWorkArena-GreenAgent
+	url = ./FieldWorkArena-GreenAgent
