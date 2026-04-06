@@ -1,0 +1,21 @@
+FROM python:3.12-slim
+WORKDIR /app
+RUN apt-get update && apt-get install -y curl libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+COPY FieldWorkArena-GreenAgent/ ./FieldWorkArena-GreenAgent/
+COPY FieldWorkArena-GreenAgent/scenarios/ ./scenarios/
+RUN pip install uv --break-system-packages && \
+    cd FieldWorkArena-GreenAgent && \
+    uv export --no-hashes > /tmp/requirements.txt && \
+    pip install -r /tmp/requirements.txt --break-system-packages
+COPY FieldWorkArena-GreenAgent/benchmark/ /app/FieldWorkArena-GreenAgent/benchmark/
+COPY FieldWorkArena-GreenAgent/scenarios/fwa/purple_agent/learned_distances.json \
+     /app/scenarios/fwa/purple_agent/learned_distances.json
+COPY agentx-sprint2-bin /app/agentx-sprint2
+COPY start.sh /app/start.sh
+RUN chmod +x /app/agentx-sprint2 /app/start.sh
+ENV PORT=9019
+EXPOSE 9019
+HEALTHCHECK --interval=10s --timeout=5s --start-period=60s \
+    CMD curl -f http://localhost:9019/.well-known/agent-card.json || exit 1
+ENTRYPOINT ["/app/start.sh"]

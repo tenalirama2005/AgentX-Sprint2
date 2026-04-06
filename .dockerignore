@@ -48,3 +48,9 @@ docker-compose*
 # AgentX-Phase2 (different project)
 k8s/
 istio*/
+target/
+FieldWorkArena-GreenAgent/.venv/
+FieldWorkArena-GreenAgent/data/
+*.tar.gz
+*.zip
+FieldWorkArena-GreenAgent/.venv/
