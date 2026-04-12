@@ -11,6 +11,7 @@
     env: {
       GEMINI_API_KEY: "${config.gemini_api_key}",
       NEBIUS_API_KEY: "${config.nebius_api_key}",
+      NVIDIA_API_KEY: "${config.nvidia_api_key}",
       OPENAI_API_KEY: "${config.openai_api_key}",
       HF_TOKEN: "${config.hf_token}",
     },
@@ -25,6 +26,7 @@
     properties: {
       gemini_api_key: { type: "string", secret: true },
       nebius_api_key: { type: "string", secret: true },
+      nvidia_api_key: { type: "string", secret: true },
       openai_api_key: { type: "string", secret: true },
       hf_token: { type: "string", secret: true },
     },
