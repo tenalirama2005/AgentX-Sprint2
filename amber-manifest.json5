@@ -2,15 +2,9 @@
   manifest_version: "0.1.0",
   program: {
     image: "tenalirama2026/agentx-sprint2:latest",
-    entrypoint: [
-      "/usr/local/bin/python3",
-      "/app/scenarios/fwa/purple_agent/fba_agent.py",
-      "--host", "0.0.0.0",
-      "--port", "9019"
-    ],
+    entrypoint: ["/app/start.sh"],
     env: {
-      GEMINI_API_KEY: "${config.gemini_api_key}",
-      NVIDIA_API_KEY: "${config.nvidia_api_key}",
+      GEMINI_API_KEY: "${config.gemini_api_key}",      
       NEBIUS_API_KEY: "${config.nebius_api_key}",
       OPENAI_API_KEY: "${config.openai_api_key}",
       HF_TOKEN: "${config.hf_token}",
@@ -24,8 +18,7 @@
   config_schema: {
     type: "object",
     properties: {
-      gemini_api_key: { type: "string", secret: true },
-      nvidia_api_key: { type: "string", secret: true },
+      gemini_api_key: { type: "string", secret: true },      
       nebius_api_key: { type: "string", secret: true },
       openai_api_key: { type: "string", secret: true },
       hf_token: { type: "string", secret: true },
