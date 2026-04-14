@@ -1,7 +1,7 @@
 {
   manifest_version: "0.1.0",
   program: {
-    image: "tenalirama2026/agentx-sprint2:v2",
+    image: "tenalirama2026/agentx-sprint2:v3",
     entrypoint: [
       "/usr/local/bin/python3",
       "/app/scenarios/fwa/purple_agent/fba_agent.py",
